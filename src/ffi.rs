@@ -1,5 +1,5 @@
 use libc::{c_char, c_int, uint32_t, c_void, size_t};
-use rtcore_ray::*;
+use ray::Ray;
 
 pub enum RTCDevice {}
 pub enum RTCScene {}

@@ -1,6 +1,6 @@
 use std::f32;
 use cgmath::{Vector3,Point3,Vector2,InnerSpace};
-use rtcore::*;
+use scene::*;
 
 /// Value for an invalid ID
 pub const INVALID_GEOMETRY_ID: u32 = !0;

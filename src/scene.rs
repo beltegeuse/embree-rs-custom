@@ -1,8 +1,9 @@
 extern crate cgmath;
 use cgmath::{Vector3,Vector2};
 
-use rtcore_ffi::*;
-pub use rtcore_ray::*;
+use ffi::*;
+pub use ray::*;
+
 use std::ptr;
 use std::sync::Arc;
 
@@ -255,26 +256,10 @@ enum_from_primitive! {
     }
 
 enum_from_primitive! {
-        enum MatrixType {
-            RowMajor             = 0,
-            ColumnMajor          = 1,
-            ColumnMajorAligned16 = 2,
-        }
-    }
-
-enum_from_primitive! {
         /// For requesting a particular behavior for a given triangle mesh
         pub enum GeometryFlags {
             Static     = 0,
             Deformable = 1,
             Dynamic    = 2,
-        }
-    }
-
-enum_from_primitive! {
-        enum BoundaryMode {
-            None          = 0,
-            EdgeOnly      = 1,
-            EdgeAndCorner = 2,
         }
     }
