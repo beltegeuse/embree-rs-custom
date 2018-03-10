@@ -37,5 +37,5 @@ maintenance = { status = "experimental" }
 [dependencies]
 libc = "0.2"
 bitflags = "1.0"
-enum_primitive = "*"
-cgmath = "*"
+enum_primitive = "0.1.1"
+cgmath = "0.16.0"
