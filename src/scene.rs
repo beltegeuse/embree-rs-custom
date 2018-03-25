@@ -141,8 +141,9 @@ impl<'a> Scene<'a> {
     /// set.
     /// TODO: Express this constraint through the type system so that a user
     /// can't call the wrong type of function
-    pub fn occluded(&self, ray: &mut Ray) {
-        unsafe { rtcIntersect(self.ptr, ray) }
+    pub fn occluded(&self, mut ray: Ray) -> bool {
+        unsafe { rtcOccluded(self.ptr, &mut ray) }
+        ray.hit()
     }
 
     /// Create a new TriangleMesh with the supplied vertex and indices vectors.

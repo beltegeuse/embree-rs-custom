@@ -19,6 +19,7 @@ extern "C" {
     pub fn rtcCommit(s: *mut RTCScene);
 
     pub fn rtcIntersect(s: *const RTCScene, ray: *mut Ray);
+    pub fn rtcOccluded(s: *const RTCScene, ray: *mut Ray);
 
     pub fn rtcNewTriangleMesh(s: *mut RTCScene,
                               geom_flags: c_int,
