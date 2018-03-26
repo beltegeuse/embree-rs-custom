@@ -12,38 +12,45 @@ use std::sync::Arc;
 /// application to use the API without interfering with one another.
 /// An application typically creates a single device only and should not create
 /// many of them.
-pub struct Device<'a> {
-    ptr: &'a mut RTCDevice,
+pub struct Device<'device> {
+    handle: &'device mut RTCDevice,
 }
 
-impl<'a> Device<'a> {
+impl<'device> Device<'device> {
     /// Creates a new Device
-    pub fn new() -> Device<'a> {
+    pub fn new() -> Device<'device> {
         let p = unsafe { rtcNewDevice(ptr::null()) };
         // If the RTCDevice is null then something very bad has happened and we
         // can't continue
         assert!(!p.is_null());
-        Device { ptr: unsafe { &mut *p } }
+        Device { handle:unsafe {&mut * p} }
     }
 
-    /// Creates a new Scene attached to this Device
-    pub fn new_scene(&mut self,
-                     sflags: SceneFlags,
-                     aflags: AlgorithmFlags)
-                     -> Scene<'a> {
-        let p = unsafe {
-            rtcDeviceNewScene(self.ptr, sflags.bits as i32, aflags.bits as i32)
-        };
-        // If the RTCScene is null then something very bad has happened and we
-        // can't continue
-        assert!(!p.is_null());
-        Scene::new(p)
+    pub fn get_error(&mut self) -> Option<RTCError> {
+        let error = unsafe { rtcDeviceGetError(self.handle) };
+        match error {
+            RTCError::RtcNoError => None,
+            _x => Some(_x),
+        }
+    }
+
+    pub fn commit(&mut self, scene: SceneConstruct<'device>) -> Result<Scene<'device>, String> {
+        unsafe { rtcCommit(scene.handle) }
+
+        match self.get_error() {
+            None => Ok(Scene {
+                handle: scene.handle,
+                geometry: scene.geometry,
+            }),
+            Some(x) => Err(format!("Embree raised an error: {:?}", x)),
+        }
     }
 }
 
-impl<'a> Drop for Device<'a> {
+impl<'device> Drop for Device<'device> {
     fn drop(&mut self) {
-        unsafe { rtcDeleteDevice(self.ptr) };
+        println!("DEVICE DROPPED");
+        unsafe { rtcDeleteDevice(self.handle) };
     }
 }
 
@@ -93,82 +100,47 @@ struct EmbreeTriangle {
     i2 : i32
 }
 
-/// Wrapper struct representing a scene, i.e. a collection of geometry to be
-/// traced.
-pub struct Scene<'a> {
-    ptr: &'a mut RTCScene,
+/// The object used to pass data to Embree.
+/// The commit function need to be called in order to get Scene object.
+/// Only Scene object provides intersection routines.
+pub struct SceneConstruct<'device> {
+    handle: &'device mut RTCScene,
     geometry: Vec<Arc<TriangleMesh>>,
 }
 
-impl<'a> Drop for Scene<'a> {
-    fn drop(&mut self) {
-        unsafe { rtcDeleteScene(self.ptr) };
-    }
-}
+impl<'device> SceneConstruct<'device> {
+    pub fn new(device: &mut Device<'device>, sflags: SceneFlags, aflags: AlgorithmFlags) -> SceneConstruct<'device> {
+        let p = unsafe {
+            rtcDeviceNewScene(device.handle, sflags.bits as i32, aflags.bits as i32)
+        };
 
-impl<'a> Scene<'a> {
-    fn new(p: *mut RTCScene) -> Scene<'a> {
-        Scene {
-            ptr: unsafe { &mut *p },
+        SceneConstruct {
+            handle: unsafe {&mut * p},
             geometry: Vec::<Arc<TriangleMesh>>::new(),
         }
     }
 
-    pub fn mesh(&self, i: usize) -> &Arc<TriangleMesh>{
-        &self.geometry[i]
-    }
-
-    /// Must be called after creating geometry and before tracing any rays
-    /// TODO: Express this constraint through the type system so the user
-    /// can't call intersect on an uncommited scene, and can't specify new
-    /// geometry once the scene is committed.
-    pub fn commit(&mut self) {
-        unsafe { rtcCommit(self.ptr) }
-    }
-
-    /// Intersects a single ray with the scene.
-    /// This function can only be called for scenes with the rtcIntersect1 flag
-    /// set.
-    /// TODO: Express this constraint through the type system so that a user
-    /// can't call the wrong type of function
-    pub fn intersect(&self, mut ray: Ray) -> Option<Intersection> {
-        unsafe { rtcIntersect(self.ptr, &mut ray) };
-        Intersection::from_ray(&self, ray)
-    }
-
-    /// Tests if a single ray is occluded by the scene.
-    /// This function can only be called for scenes with the rtcIntersect1 flag
-    /// set.
-    /// TODO: Express this constraint through the type system so that a user
-    /// can't call the wrong type of function
-    pub fn occluded(&self, mut ray: Ray) -> bool {
-        unsafe { rtcOccluded(self.ptr, &mut ray) }
-        ray.hit()
-    }
-
-    /// Create a new TriangleMesh with the supplied vertex and indices vectors.
-    pub fn new_triangle_mesh(&mut self,
+    /// Add a new TriangleMesh with the supplied vertex and indices vectors.
+    pub fn add_triangle_mesh(&mut self,
                              geom_flags: GeometryFlags,
                              vertices: Vec<Vector3<f32>>,
                              normals: Vec<Vector3<f32>>,
                              uv: Vec<Vector2<f32>>,
                              indices: Vec<u32>) -> Arc<TriangleMesh> {
-        assert!(indices.len() % 3 == 0,
-                "Indices must be a multiple of 3 for a triangle mesh but \
-                 indices Vec has length {}",
-                indices.len());
+        assert_eq!(indices.len() % 3, 0, "Indices must be a multiple of 3 for a triangle mesh but \
+         indices Vec has length {}", indices.len());
         let num_triangles = indices.len() / 3;
 
-        let geom_id = unsafe { rtcNewTriangleMesh(self.ptr,
-                                         geom_flags as i32,
-                                         num_triangles,
-                                         vertices.len(),
-                                         1) };
+        let geom_id = unsafe { rtcNewTriangleMesh(self.handle,
+                                                  geom_flags as i32,
+                                                  num_triangles,
+                                                  vertices.len(),
+                                                  1) };
 
         // Set vertex buffer
         unsafe {
-            let e_vertices =  rtcMapBuffer(self.ptr, geom_id,
-                         BufferType::VertexBuffer0 as i32) as *mut EmbreeVertex ;
+            let e_vertices =  rtcMapBuffer(self.handle, geom_id,
+                                           BufferType::VertexBuffer0 as i32) as *mut EmbreeVertex ;
 
             for (i,v) in vertices.iter().enumerate() {
                 (*e_vertices.offset(i as isize)).x = v.x;
@@ -177,12 +149,12 @@ impl<'a> Scene<'a> {
                 (*e_vertices.offset(i as isize)).w = 1.0;
 
             }
-            rtcUnmapBuffer(self.ptr, geom_id, BufferType::VertexBuffer0 as i32);
+            rtcUnmapBuffer(self.handle, geom_id, BufferType::VertexBuffer0 as i32);
         }
 
         // Set index buffer
         unsafe {
-            let e_indicies = rtcMapBuffer(self.ptr, geom_id,
+            let e_indicies = rtcMapBuffer(self.handle, geom_id,
                                           BufferType::IndexBuffer as i32) as *mut EmbreeTriangle;
             {
                 let mut i: isize = 0;
@@ -196,19 +168,56 @@ impl<'a> Scene<'a> {
                     i += 1;
                 }
             }
-            rtcUnmapBuffer(self.ptr, geom_id, BufferType::IndexBuffer as i32);
+            rtcUnmapBuffer(self.handle, geom_id, BufferType::IndexBuffer as i32);
         }
 
         // Insert the new mesh into the geometry vector
         self.geometry.push(Arc::new(TriangleMesh {
-            geom_id: geom_id,
-            vertices: vertices,
-            normals: normals,
-            uv: uv,
-            indices: indices,
+            geom_id,
+            vertices,
+            normals,
+            uv,
+            indices,
         }));
 
         return Arc::clone(self.geometry.last().unwrap())
+    }
+}
+
+pub struct Scene<'device> {
+    handle: &'device mut RTCScene,
+    geometry: Vec<Arc<TriangleMesh>>,
+}
+
+impl<'device> Drop for Scene<'device> {
+    fn drop(&mut self) {
+        unsafe { rtcDeleteScene(self.handle) };
+    }
+}
+
+impl<'device> Scene<'device> {
+    pub fn mesh(&self, i: usize) -> &Arc<TriangleMesh>{
+        &self.geometry[i]
+    }
+
+    /// Intersects a single ray with the scene.
+    /// This function can only be called for scenes with the rtcIntersect1 flag
+    /// set.
+    /// TODO: Express this constraint through the type system so that a user
+    /// can't call the wrong type of function
+    pub fn intersect(&self, mut ray: Ray) -> Option<Intersection> {
+        unsafe { rtcIntersect(self.handle, &mut ray) };
+        Intersection::from_ray(&self, ray)
+    }
+
+    /// Tests if a single ray is occluded by the scene.
+    /// This function can only be called for scenes with the rtcIntersect1 flag
+    /// set.
+    /// TODO: Express this constraint through the type system so that a user
+    /// can't call the wrong type of function
+    pub fn occluded(&self, mut ray: Ray) -> bool {
+        unsafe { rtcOccluded(self.handle, &mut ray) }
+        ray.hit()
     }
 }
 

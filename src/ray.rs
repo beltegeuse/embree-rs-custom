@@ -6,16 +6,11 @@ use scene::*;
 pub const INVALID_GEOMETRY_ID: u32 = !0;
 
 /// Structure for embree to represent a ray
-#[repr(C)]
+#[repr(C,align(16))]
 pub struct Ray {
     /// Ray origin
-    pub org: [f32; 3usize],
-    /// Memory align
-    align0: f32,
-
-    /// Ray direction
-    pub dir: [f32; 3usize],
-    align1: f32, /// Memory align
+    pub org: [f32; 4usize],
+    pub dir: [f32; 4usize],
 
     /// Start of ray segment
     pub tnear: f32,
@@ -28,9 +23,7 @@ pub struct Ray {
     pub mask: u32,
 
     /// Unnormalized geometric normal
-    pub n_g: [f32; 3usize],
-    /// Memory align
-    align2: f32,
+    pub n_g: [f32; 4usize],
 
     /// Barycentric u coordinate at hit
     pub u: f32,
@@ -43,9 +36,17 @@ pub struct Ray {
     pub prim_id: u32,
     /// Instance ID
     pub inst_id: u32,
+}
 
-    /// Padding
-    _padding: [u32; 3usize],
+#[test]
+fn align_ray() {
+    assert_eq!(::std::mem::align_of::<Ray>(), 16usize);
+}
+
+#[test]
+fn memsize_ray() {
+    assert_eq!(::std::mem::size_of::<Ray>() , 96usize , concat ! (
+               "Size of: " , stringify ! ( Ray ) ));
 }
 
 /// Holds the data representing a successful ray intersection
@@ -74,22 +75,18 @@ impl Ray {
                tnear: f32,
                tfar: f32) -> Ray {
         Ray {
-            org: [origin.x, origin.y, origin.z],
-            align0: 0.0,
-            dir: [direction.x, direction.y, direction.z],
-            align1: 0.0,
+            org: [origin.x, origin.y, origin.z, 0.0],
+            dir: [direction.x, direction.y, direction.z, 0.0],
             tnear,
             tfar,
             time: 0.0,
             mask: 0xFFFFFFFF,
-            n_g: [0.0,0.0,0.0],
-            align2: 0.0,
+            n_g: [0.0,0.0,0.0,0.0],
             u: 0.0,
             v: 0.0,
             geom_id: INVALID_GEOMETRY_ID,
             prim_id: INVALID_GEOMETRY_ID,
             inst_id: INVALID_GEOMETRY_ID,
-            _padding : [0,0,0],
         }
     }
 

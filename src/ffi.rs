@@ -4,6 +4,18 @@ use ray::Ray;
 pub enum RTCDevice {}
 pub enum RTCScene {}
 
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum RTCError {
+    RtcNoError = 0,
+    RtcUnknownError = 1,
+    RtcInvalidArgument = 2,
+    RtcInvalidOperation = 3,
+    RtcOutOfMemory = 4,
+    RtcUnsupportedCpu = 5,
+    RtcCancelled = 6,
+}
+
 #[allow(dead_code)]
 #[link(name="embree")]
 extern "C" {
@@ -40,8 +52,10 @@ extern "C" {
     pub fn rtcSetUserData(s: *mut RTCScene, geom_id: uint32_t, ptr: *const c_void);
     pub fn rtcGetUserData(s: *const RTCScene, geom_id: uint32_t) -> *mut c_void;
 
-    pub fn rtcMapBuffer(s: *mut RTCScene, geomID: uint32_t,
+    pub fn rtcMapBuffer(s: *mut RTCScene, geom_id: uint32_t,
                         buffer_type: c_int) -> *mut c_void;
-    pub fn rtcUnmapBuffer(s: *mut RTCScene, geomID: uint32_t,
+    pub fn rtcUnmapBuffer(s: *mut RTCScene, geom_id: uint32_t,
                           buffer_type: c_int);
+
+    pub fn rtcDeviceGetError(device: *mut RTCDevice) -> RTCError;
 }
