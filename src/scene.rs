@@ -49,7 +49,6 @@ impl<'device> Device<'device> {
 
 impl<'device> Drop for Device<'device> {
     fn drop(&mut self) {
-        println!("DEVICE DROPPED");
         unsafe { rtcDeleteDevice(self.handle) };
     }
 }
