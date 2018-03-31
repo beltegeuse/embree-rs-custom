@@ -17,6 +17,11 @@ use cgmath::InnerSpace;
 // Include the binding
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+#[test]
+fn test_ray_align() {
+    assert_eq!(::std::mem::align_of::<root::RTCRay>(), 16usize);
+}
+
 pub const INVALID_GEOMETRY_ID: u32 = !0;
 impl root::RTCRay {
     pub fn hit(&self) -> bool {
