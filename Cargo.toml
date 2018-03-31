@@ -38,6 +38,8 @@ maintenance = { status = "experimental" }
 libc = "0.2"
 cgmath = "0.16.1"
 clippy = { version = "0.0.189", optional = true }
+bitflags = "1.0.1"
 
-[build-dependencies]
-bindgen = "0.35.0"
+[build-dependencies.bindgen]
+version = "0.35.0"
+features = []
