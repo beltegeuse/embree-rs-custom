@@ -1,41 +1,43 @@
 extern crate cgmath;
 use cgmath::{Vector3,Vector2};
 
-use ffi::*;
 pub use ray::*;
+use super::root;
 
 use std::ptr;
 use std::sync::Arc;
+
+
 
 /// Wrapper around the RTCDevice opaque struct.
 /// Embree supports a device concept which allows different components of the
 /// application to use the API without interfering with one another.
 /// An application typically creates a single device only and should not create
 /// many of them.
-pub struct Device<'device> {
-    handle: &'device mut RTCDevice,
+pub struct Device {
+    handle: root::RTCDevice,
 }
 
-impl<'device> Device<'device> {
+impl Device {
     /// Creates a new Device
-    pub fn new() -> Device<'device> {
-        let p = unsafe { rtcNewDevice(ptr::null()) };
+    pub fn new() -> Device {
+        let p = unsafe { root::rtcNewDevice(ptr::null()) };
         // If the RTCDevice is null then something very bad has happened and we
         // can't continue
         assert!(!p.is_null());
-        Device { handle:unsafe {&mut * p} }
+        Device { handle: p }
     }
 
-    pub fn get_error(&mut self) -> Option<RTCError> {
-        let error = unsafe { rtcDeviceGetError(self.handle) };
+    pub fn get_error(&mut self) -> Option<root::RTCError> {
+        let error = unsafe { root::rtcDeviceGetError(self.handle) };
         match error {
-            RTCError::RtcNoError => None,
+            root::RTCError_RTC_NO_ERROR => None,
             _x => Some(_x),
         }
     }
 
-    pub fn commit(&mut self, scene: SceneConstruct<'device>) -> Result<Scene<'device>, String> {
-        unsafe { rtcCommit(scene.handle) }
+    pub fn commit(&mut self, scene: SceneConstruct) -> Result<Scene, String> {
+        unsafe { root::rtcCommit(scene.handle) }
 
         match self.get_error() {
             None => Ok(Scene {
@@ -47,38 +49,9 @@ impl<'device> Device<'device> {
     }
 }
 
-impl<'device> Drop for Device<'device> {
+impl Drop for Device {
     fn drop(&mut self) {
-        unsafe { rtcDeleteDevice(self.handle) };
-    }
-}
-
-bitflags! {
-    /// Flags to configure the scene
-    pub struct SceneFlags: i32 {
-        const STATIC       = (0 << 0); /// Static spatial data structure
-        const DYNAMIC      = (0 << 1); /// Dynamic spatial data structure
-
-        const COMPACT      = (1 << 8); /// Prefer to have compact spatial data structure
-        const COHERENT     = (1 << 9); /// Prefer high-performance spatial data structure for coherent rays
-        const INCOHERENT   = (1 << 10); /// Prefer high-performance spatial data structure for incoherent rays
-        const HIGH_QUALITY = (1 << 11); /// Prefer high-quality spatial data structure (more costly to construct)
-
-        const ROBUST       = (1 << 16);
-    }
-}
-
-bitflags! {
-    /// Flags to configure which ray query we will request
-    /// # NOTES
-    /// Currently only a single intersection is supported.
-    pub struct AlgorithmFlags: i32 {
-        const INTERSECT1  = 0b00000001;
-        const INTERSECT4  = 0b00000010;
-        const INTERSECT8  = 0b00000100;
-        const INTERSECT16 = 0b00001000;
-        const INTERPOLATE = 0b00010000;
-
+        unsafe { root::rtcDeleteDevice(self.handle) };
     }
 }
 
@@ -102,26 +75,26 @@ struct EmbreeTriangle {
 /// The object used to pass data to Embree.
 /// The commit function need to be called in order to get Scene object.
 /// Only Scene object provides intersection routines.
-pub struct SceneConstruct<'device> {
-    handle: &'device mut RTCScene,
+pub struct SceneConstruct {
+    handle: root::RTCScene,
     geometry: Vec<Arc<TriangleMesh>>,
 }
 
-impl<'device> SceneConstruct<'device> {
-    pub fn new(device: &mut Device<'device>, sflags: SceneFlags, aflags: AlgorithmFlags) -> SceneConstruct<'device> {
+impl SceneConstruct {
+    pub fn new(device: &mut Device, sflags: root::RTCSceneFlags, aflags: root::RTCAlgorithmFlags) -> SceneConstruct {
         let p = unsafe {
-            rtcDeviceNewScene(device.handle, sflags.bits as i32, aflags.bits as i32)
+            root::rtcDeviceNewScene(device.handle, sflags, aflags)
         };
 
         SceneConstruct {
-            handle: unsafe {&mut * p},
+            handle: p,
             geometry: Vec::<Arc<TriangleMesh>>::new(),
         }
     }
 
     /// Add a new TriangleMesh with the supplied vertex and indices vectors.
     pub fn add_triangle_mesh(&mut self,
-                             geom_flags: GeometryFlags,
+                             geom_flags: root::RTCGeometryFlags,
                              vertices: Vec<Vector3<f32>>,
                              normals: Vec<Vector3<f32>>,
                              uv: Vec<Vector2<f32>>,
@@ -130,16 +103,18 @@ impl<'device> SceneConstruct<'device> {
          indices Vec has length {}", indices.len());
         let num_triangles = indices.len() / 3;
 
-        let geom_id = unsafe { rtcNewTriangleMesh(self.handle,
-                                                  geom_flags as i32,
+        let geom_id = unsafe { root::rtcNewTriangleMesh(self.handle,
+                                                  geom_flags,
                                                   num_triangles,
                                                   vertices.len(),
                                                   1) };
 
         // Set vertex buffer
         unsafe {
-            let e_vertices =  rtcMapBuffer(self.handle, geom_id,
-                                           BufferType::VertexBuffer0 as i32) as *mut EmbreeVertex ;
+            let e_vertices =  root::rtcMapBuffer(
+                self.handle,
+                geom_id,
+                root::RTCBufferType_RTC_VERTEX_BUFFER0) as *mut EmbreeVertex ;
 
             for (i,v) in vertices.iter().enumerate() {
                 (*e_vertices.offset(i as isize)).x = v.x;
@@ -148,13 +123,15 @@ impl<'device> SceneConstruct<'device> {
                 (*e_vertices.offset(i as isize)).w = 1.0;
 
             }
-            rtcUnmapBuffer(self.handle, geom_id, BufferType::VertexBuffer0 as i32);
+            root::rtcUnmapBuffer(self.handle,
+                                 geom_id,
+                                 root::RTCBufferType_RTC_VERTEX_BUFFER);
         }
 
         // Set index buffer
         unsafe {
-            let e_indicies = rtcMapBuffer(self.handle, geom_id,
-                                          BufferType::IndexBuffer as i32) as *mut EmbreeTriangle;
+            let e_indicies = root::rtcMapBuffer(self.handle, geom_id,
+                                                root::RTCBufferType_RTC_INDEX_BUFFER) as *mut EmbreeTriangle;
             {
                 let mut i: isize = 0;
                 let mut indice_iter = indices.iter();
@@ -167,7 +144,8 @@ impl<'device> SceneConstruct<'device> {
                     i += 1;
                 }
             }
-            rtcUnmapBuffer(self.handle, geom_id, BufferType::IndexBuffer as i32);
+            root::rtcUnmapBuffer(self.handle, geom_id,
+                                 root::RTCBufferType_RTC_INDEX_BUFFER);
         }
 
         // Insert the new mesh into the geometry vector
@@ -183,18 +161,18 @@ impl<'device> SceneConstruct<'device> {
     }
 }
 
-pub struct Scene<'device> {
-    handle: &'device mut RTCScene,
+pub struct Scene {
+    handle: root::RTCScene,
     geometry: Vec<Arc<TriangleMesh>>,
 }
 
-impl<'device> Drop for Scene<'device> {
+impl Drop for Scene {
     fn drop(&mut self) {
-        unsafe { rtcDeleteScene(self.handle) };
+        unsafe { root::rtcDeleteScene(self.handle) };
     }
 }
 
-impl<'device> Scene<'device> {
+impl Scene {
     pub fn mesh(&self, i: usize) -> &Arc<TriangleMesh>{
         &self.geometry[i]
     }
@@ -204,8 +182,8 @@ impl<'device> Scene<'device> {
     /// set.
     /// TODO: Express this constraint through the type system so that a user
     /// can't call the wrong type of function
-    pub fn intersect(&self, mut ray: Ray) -> Option<Intersection> {
-        unsafe { rtcIntersect(self.handle, &mut ray) };
+    pub fn intersect(&self, mut ray: root::RTCRay) -> Option<Intersection> {
+        unsafe { root::rtcIntersect(self.handle, &mut ray) };
         Intersection::from_ray(&self, ray)
     }
 
@@ -214,8 +192,8 @@ impl<'device> Scene<'device> {
     /// set.
     /// TODO: Express this constraint through the type system so that a user
     /// can't call the wrong type of function
-    pub fn occluded(&self, mut ray: Ray) -> bool {
-        unsafe { rtcOccluded(self.handle, &mut ray) }
+    pub fn occluded(&self, mut ray: root::RTCRay) -> bool {
+        unsafe { root::rtcOccluded(self.handle, &mut ray) }
         ray.hit()
     }
 }
@@ -237,38 +215,3 @@ pub struct TriangleMesh {
     /// The list of all indices to defining the triangles.
     pub indices: Vec<u32>,
 }
-
-enum_from_primitive! {
-/// Enum describing the type of buffer to map.
-/// Note that the original flags from embree contain duplicates so in Rust
-/// VertexBuffer becomes VertexBuffer0 etc.
-        enum BufferType {
-            IndexBuffer              = 0x01000000,
-
-            VertexBuffer0            = 0x02000000,
-            VertexBuffer1            = 0x02000001,
-
-            UserVertexBuffer0        = 0x02100000,
-            UserVertexBuffer1        = 0x02100001,
-
-            FaceBuffer               = 0x03000000,
-            LevelBuffer              = 0x04000001,
-
-            EdgeCreaseIndexBuffer    = 0x05000000,
-            EdgeCreaseWeightBuffer   = 0x06000000,
-
-            VertexCreaseIndexBuffer  = 0x07000000,
-            VertexCreaseWeightBuffer = 0x08000000,
-
-            HoleBuffer               = 0x09000001,
-        }
-    }
-
-enum_from_primitive! {
-        /// For requesting a particular behavior for a given triangle mesh
-        pub enum GeometryFlags {
-            Static     = 0,
-            Deformable = 1,
-            Dynamic    = 2,
-        }
-    }
