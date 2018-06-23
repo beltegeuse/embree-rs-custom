@@ -21,6 +21,8 @@ Please contact me if your project uses this wrapper so I can update this above l
 - add documentation
 - add an example of a simple Whitted ray tracing 
 - add more intersections routines
+- add phantom data
+- expose different configurations (ray, scene, ...)
 
 ## Credits
 
