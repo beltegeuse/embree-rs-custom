@@ -47,7 +47,7 @@ impl Device {
     }
 
     pub fn debug() -> Device {
-        let cfg = CString::new("verbose=4").unwrap();
+        let cfg = CString::new("verbose=1").unwrap();
         Device {
             handle: unsafe { root::rtcNewDevice(cfg.as_ptr()) },
         }
@@ -134,7 +134,7 @@ impl SceneConstruct {
                 geom_handle,
                 root::RTCBufferType::VERTEX,
                 0,
-                root::RTCFormat::FLOAT4,
+                root::RTCFormat::FLOAT3,
                 buffer_handle,
                 0,
                 16,
@@ -173,6 +173,9 @@ impl SceneConstruct {
                 12,
                 num_triangles,
             );
+        }
+        unsafe {
+            root::rtcCommitGeometry(geom_handle);
         }
 
         let geom_id = unsafe { root::rtcAttachGeometry(self.handle, geom_handle) };
@@ -358,7 +361,7 @@ pub struct Intersection {
 impl Intersection {
     pub fn from_ray(scene: &Scene, rh: root::RTCRayHit) -> Option<Intersection> {
         if rh.hit.geomID != std::u32::MAX {
-            let mesh = scene.mesh(rh.ray.id as usize);
+            let mesh = scene.mesh(rh.hit.geomID as usize);
             let i0 = mesh.indices[(rh.hit.primID * 3) as usize] as usize;
             let i1 = mesh.indices[(rh.hit.primID * 3 + 1) as usize] as usize;
             let i2 = mesh.indices[(rh.hit.primID * 3 + 2) as usize] as usize;
