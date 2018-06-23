@@ -7,7 +7,7 @@ use std::path::PathBuf;
 fn main() {
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
-    println!("cargo:rustc-link-lib=embree");
+    println!("cargo:rustc-link-lib=embree3");
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
@@ -57,6 +57,7 @@ fn main() {
         "RTC_CURVE_FLAG_",
         "RTC_SCENE_FLAG_",
         "RTC_BUILD_FLAG_",
+        "pub __bindgen_align: [u8; 0usize],",
     ];
 
     // Open and read the file entirely

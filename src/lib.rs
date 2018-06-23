@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 // Include the binding
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
 #[test]
 fn test_ray_align() {
     assert_eq!(::std::mem::align_of::<root::RTCRay>(), 16usize);
@@ -53,26 +52,6 @@ impl Device {
             handle: unsafe { root::rtcNewDevice(cfg.as_ptr()) },
         }
     }
-
-    pub fn get_error(&mut self) -> Option<root::RTCError> {
-        let error = unsafe { root::rtcDeviceGetError(self.handle) };
-        match error {
-            root::RTCError::NONE => None,
-            _x => Some(_x),
-        }
-    }
-
-    pub fn commit(&mut self, scene: SceneConstruct) -> Result<Scene, String> {
-        unsafe { root::rtcCommit(scene.handle) }
-
-        match self.get_error() {
-            None => Ok(Scene {
-                handle: scene.handle,
-                geometry: scene.geometry,
-            }),
-            Some(x) => Err(format!("Embree raised an error: {:?}", x)),
-        }
-    }
 }
 
 impl Drop for Device {
@@ -107,7 +86,7 @@ pub struct SceneConstruct {
 }
 
 impl SceneConstruct {
-    pub fn new(device: &mut Device) -> SceneConstruct {
+    pub fn new(device: &Device) -> SceneConstruct {
         let p = unsafe { root::rtcNewScene(device.handle) };
 
         SceneConstruct {
@@ -119,8 +98,7 @@ impl SceneConstruct {
     /// Add a new TriangleMesh with the supplied vertex and indices vectors.
     pub fn add_triangle_mesh(
         &mut self,
-        device: &mut Device,
-        geom_flags: GeometryFlags,
+        device: &Device,
         vertices: Vec<Vector3<f32>>,
         normals: Vec<Vector3<f32>>,
         uv: Vec<Vector2<f32>>,
@@ -134,28 +112,45 @@ impl SceneConstruct {
             indices.len()
         );
         let num_triangles = indices.len() / 3;
-
-        let geom_id =
+        let geom_handle =
             unsafe { root::rtcNewGeometry(device.handle, root::RTCGeometryType::TRIANGLE) };
 
         // Set vertex buffer
         unsafe {
-            let e_vertices = root::rtcMapBuffer(self.handle, geom_id, root::RTCBufferType::VERTEX)
-                as *mut EmbreeVertex;
-
+            let buffer_handle = {
+                root::rtcNewBuffer(
+                    device.handle,
+                    vertices.len() * std::mem::size_of::<Vector3<EmbreeVertex>>(),
+                )
+            };
+            let e_vertices = { root::rtcGetBufferData(buffer_handle) as *mut EmbreeVertex };
             for (i, v) in vertices.iter().enumerate() {
                 (*e_vertices.offset(i as isize)).x = v.x;
                 (*e_vertices.offset(i as isize)).y = v.y;
                 (*e_vertices.offset(i as isize)).z = v.z;
                 (*e_vertices.offset(i as isize)).w = 1.0;
             }
-            root::rtcUnmapBuffer(self.handle, geom_id, root::RTCBufferType::VERTEX);
+            root::rtcSetGeometryBuffer(
+                geom_handle,
+                root::RTCBufferType::VERTEX,
+                0,
+                root::RTCFormat::FLOAT4,
+                buffer_handle,
+                0,
+                16,
+                vertices.len(),
+            );
         }
 
         // Set index buffer
         unsafe {
-            let e_indicies = root::rtcMapBuffer(self.handle, geom_id, root::RTCBufferType::INDEX)
-                as *mut EmbreeTriangle;
+            let buffer_handle = {
+                root::rtcNewBuffer(
+                    device.handle,
+                    num_triangles * std::mem::size_of::<Vector3<EmbreeTriangle>>(),
+                )
+            };
+            let e_indicies = { root::rtcGetBufferData(buffer_handle) as *mut EmbreeTriangle };
             {
                 let mut i: isize = 0;
                 let mut indice_iter = indices.iter();
@@ -168,11 +163,23 @@ impl SceneConstruct {
                     i += 1;
                 }
             }
-            root::rtcUnmapBuffer(self.handle, geom_id, root::RTCBufferType::INDEX);
+            root::rtcSetGeometryBuffer(
+                geom_handle,
+                root::RTCBufferType::INDEX,
+                0,
+                root::RTCFormat::UINT3,
+                buffer_handle,
+                0,
+                12,
+                num_triangles,
+            );
         }
+
+        let geom_id = unsafe { root::rtcAttachGeometry(self.handle, geom_handle) };
 
         // Insert the new mesh into the geometry vector
         self.geometry.push(Arc::new(TriangleMesh {
+            handle: geom_handle,
             geom_id,
             vertices,
             normals,
@@ -181,6 +188,14 @@ impl SceneConstruct {
         }));
 
         return Arc::clone(self.geometry.last().unwrap());
+    }
+
+    pub fn commit(self) -> Result<Scene, String> {
+        unsafe { root::rtcCommitScene(self.handle) }
+        Ok(Scene {
+            handle: self.handle,
+            geometry: self.geometry,
+        })
     }
 }
 
@@ -191,7 +206,7 @@ pub struct Scene {
 
 impl Drop for Scene {
     fn drop(&mut self) {
-        unsafe { root::rtcDeleteScene(self.handle) };
+        unsafe { root::rtcReleaseScene(self.handle) };
     }
 }
 
@@ -206,9 +221,26 @@ impl Scene {
     /// TODO: Express this constraint through the type system so that a user
     /// can't call the wrong type of function
     pub fn intersect(&self, ray: Ray) -> Option<Intersection> {
-        let mut internal_ray = ray.embree();
-        unsafe { root::rtcIntersect(self.handle, &mut internal_ray) };
-        Intersection::from_ray(&self, internal_ray)
+        let mut rayhit = root::RTCRayHit {
+            ray: ray.embree(),
+            hit: root::RTCHit {
+                Ng_x: 0.0,
+                Ng_y: 0.0,
+                Ng_z: 0.0,
+                u: 0.0,
+                v: 0.0,
+                primID: std::u32::MAX,
+                geomID: std::u32::MAX,
+                instID: [std::u32::MAX; 1],
+            },
+        };
+        let mut context = root::RTCIntersectContext {
+            flags: root::RTCIntersectContextFlags::INCOHERENT,
+            filter: None,
+            instID: [std::u32::MAX; 1],
+        };
+        unsafe { root::rtcIntersect1(self.handle, &mut context, &mut rayhit) };
+        Intersection::from_ray(&self, rayhit)
     }
 
     /// Tests if a single ray is occluded by the scene.
@@ -218,8 +250,13 @@ impl Scene {
     /// can't call the wrong type of function
     pub fn occluded(&self, ray: Ray) -> bool {
         let mut internal_ray = ray.embree();
-        unsafe { root::rtcOccluded(self.handle, &mut internal_ray) }
-        internal_ray.hit()
+        let mut context = root::RTCIntersectContext {
+            flags: root::RTCIntersectContextFlags::INCOHERENT,
+            filter: None,
+            instID: [std::u32::MAX; 1],
+        };
+        unsafe { root::rtcOccluded1(self.handle, &mut context, &mut internal_ray) }
+        internal_ray.tfar == std::f32::NEG_INFINITY
     }
 }
 
@@ -229,6 +266,7 @@ impl Scene {
 pub struct TriangleMesh {
     /// Geometry id from embree
     /// This id will be the same as the intersection/ray geometry ID
+    pub(crate) handle: root::RTCGeometry,
     pub geom_id: u32,
     /// The list of all vertices
     pub vertices: Vec<Vector3<f32>>,
@@ -290,15 +328,9 @@ impl Ray {
             dir_z: self.d.z,
             time: self.time,
             tfar: self.tfar,
-            mask: 0xFFFFFFFF,
-            Ng: [0.0, 0.0, 0.0],
-            align2: 0.0,
-            u: 0.0,
-            v: 0.0,
-            geomID: INVALID_GEOMETRY_ID,
-            primID: INVALID_GEOMETRY_ID,
-            instID: INVALID_GEOMETRY_ID,
-            __bindgen_padding_0: [0; 3usize],
+            mask: std::u32::MAX,
+            id: 0,
+            flags: 0,
         }
     }
 }
@@ -324,18 +356,18 @@ pub struct Intersection {
 }
 
 impl Intersection {
-    pub fn from_ray(scene: &Scene, ray: root::RTCRay) -> Option<Intersection> {
-        if ray.hit() {
-            let mesh = scene.mesh(ray.id as usize);
-            let i0 = mesh.indices[(ray.primID * 3) as usize] as usize;
-            let i1 = mesh.indices[(ray.primID * 3 + 1) as usize] as usize;
-            let i2 = mesh.indices[(ray.primID * 3 + 2) as usize] as usize;
+    pub fn from_ray(scene: &Scene, rh: root::RTCRayHit) -> Option<Intersection> {
+        if rh.hit.geomID != std::u32::MAX {
+            let mesh = scene.mesh(rh.ray.id as usize);
+            let i0 = mesh.indices[(rh.hit.primID * 3) as usize] as usize;
+            let i1 = mesh.indices[(rh.hit.primID * 3 + 1) as usize] as usize;
+            let i2 = mesh.indices[(rh.hit.primID * 3 + 2) as usize] as usize;
 
             // Normal interpolation
             let d0 = &mesh.normals[i0];
             let d1 = &mesh.normals[i1];
             let d2 = &mesh.normals[i2];
-            let n_s = d0 * (1.0 - ray.u - ray.v) + d1 * ray.u + d2 * ray.v;
+            let n_s = d0 * (1.0 - rh.hit.u - rh.hit.v) + d1 * rh.hit.u + d2 * rh.hit.v;
 
             // UV interpolation
             let uv: Option<Vector2<f32>>;
@@ -345,28 +377,28 @@ impl Intersection {
                 let d0 = &mesh.uv[i0];
                 let d1 = &mesh.uv[i1];
                 let d2 = &mesh.uv[i2];
-                uv = Some(d0 * (1.0 - ray.u - ray.v) + d1 * ray.u + d2 * ray.v);
+                uv = Some(d0 * (1.0 - rh.hit.u - rh.hit.v) + d1 * rh.hit.u + d2 * rh.hit.v);
             }
 
-            let mut n_g = Vector3::new(ray.Ng[0], ray.Ng[1], ray.Ng[2]).normalize();
+            let mut n_g = Vector3::new(rh.hit.Ng_x, rh.hit.Ng_y, rh.hit.Ng_z).normalize();
             if n_g.dot(n_s) < 0.0 {
                 n_g = -n_g;
             }
 
             // Construct the intersection
             return Some(Intersection {
-                t: ray.tfar,
+                t: rh.ray.tfar,
                 n_g,
                 n_s,
                 p: Point3::new(
-                    ray.org[0] + ray.tfar * ray.dir[0],
-                    ray.org[1] + ray.tfar * ray.dir[1],
-                    ray.org[2] + ray.tfar * ray.dir[2],
+                    rh.ray.org_x + rh.ray.tfar * rh.ray.dir_x,
+                    rh.ray.org_y + rh.ray.tfar * rh.ray.dir_y,
+                    rh.ray.org_z + rh.ray.tfar * rh.ray.dir_z,
                 ),
                 uv,
-                geom_id: ray.geomID,
-                prim_id: ray.primID,
-                inst_id: ray.instID,
+                geom_id: rh.hit.geomID,
+                prim_id: rh.hit.primID,
+                inst_id: rh.hit.instID[0],
             });
         } else {
             return None;
