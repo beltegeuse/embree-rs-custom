@@ -32,6 +32,8 @@ impl root::RTCRay {
 /// application to use the API without interfering with one another.
 /// An application typically creates a single device only and should not create
 /// many of them.
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
 pub struct Device {
     handle: root::RTCDevice,
 }
@@ -182,7 +184,7 @@ impl SceneConstruct {
 
         // Insert the new mesh into the geometry vector
         self.geometry.push(Arc::new(TriangleMesh {
-            handle: geom_handle,
+            // handle: geom_handle,
             geom_id,
             vertices,
             normals,
@@ -202,6 +204,8 @@ impl SceneConstruct {
     }
 }
 
+unsafe impl Send for Scene {}
+unsafe impl Sync for Scene {}
 pub struct Scene {
     handle: root::RTCScene,
     geometry: Vec<Arc<TriangleMesh>>,
@@ -269,7 +273,7 @@ impl Scene {
 pub struct TriangleMesh {
     /// Geometry id from embree
     /// This id will be the same as the intersection/ray geometry ID
-    pub(crate) handle: root::RTCGeometry,
+    // pub(crate) handle: &'a root::RTCGeometry,
     pub geom_id: u32,
     /// The list of all vertices
     pub vertices: Vec<Vector3<f32>>,
