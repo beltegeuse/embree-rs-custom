@@ -4,15 +4,14 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-extern crate libc;
 extern crate cgmath;
-#[macro_use]
-extern crate bitflags;
+extern crate libc;
 
-use cgmath::{Vector3,Vector2,Point3};
+use cgmath::InnerSpace;
+use cgmath::{Point3, Vector2, Vector3};
+use std::ffi::CString;
 use std::ptr;
 use std::sync::Arc;
-use cgmath::InnerSpace;
 
 // Include the binding
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -25,39 +24,9 @@ fn test_ray_align() {
 pub const INVALID_GEOMETRY_ID: u32 = !0;
 impl root::RTCRay {
     pub fn hit(&self) -> bool {
-        self.geomID != INVALID_GEOMETRY_ID
+        self.id != INVALID_GEOMETRY_ID
     }
 }
-
-bitflags! {
-    pub struct GeometryFlags: root::RTCGeometryFlags {
-        const STATIC = root::RTCGeometryFlags_RTC_GEOMETRY_STATIC;
-        const DEFORMABLE = root::RTCGeometryFlags_RTC_GEOMETRY_DEFORMABLE;
-        const DYNAMIC = root::RTCGeometryFlags_RTC_GEOMETRY_DYNAMIC;
-    }
-}
-bitflags! {
-    pub struct SceneFlags: root::RTCSceneFlags {
-        const STATIC = root::RTCSceneFlags_RTC_SCENE_STATIC;
-        const DYNAMIC = root::RTCSceneFlags_RTC_SCENE_DYNAMIC;
-        const COMPACT = root::RTCSceneFlags_RTC_SCENE_COMPACT;
-        const COHERENT = root::RTCSceneFlags_RTC_SCENE_COHERENT;
-        const INCOHERENT = root::RTCSceneFlags_RTC_SCENE_INCOHERENT;
-        const HIGH_QUALITY = root::RTCSceneFlags_RTC_SCENE_HIGH_QUALITY;
-        const ROBUST = root::RTCSceneFlags_RTC_SCENE_ROBUST;
-    }
-}
-bitflags! {
-    pub struct AlgorithmFlags: root::RTCAlgorithmFlags {
-        const INTERSECT1 = root::RTCAlgorithmFlags_RTC_INTERSECT1;
-        const INTERSECT4 = root::RTCAlgorithmFlags_RTC_INTERSECT4;
-        const INTERSECT8 = root::RTCAlgorithmFlags_RTC_INTERSECT8;
-        const INTERSECT16 = root::RTCAlgorithmFlags_RTC_INTERSECT16;
-        const INTERPOLATE = root::RTCAlgorithmFlags_RTC_INTERPOLATE;
-        const INTERSECT_STREAM = root::RTCAlgorithmFlags_RTC_INTERSECT_STREAM;
-    }
-}
-
 
 /// Wrapper around the RTCDevice opaque struct.
 /// Embree supports a device concept which allows different components of the
@@ -78,10 +47,17 @@ impl Device {
         Device { handle: p }
     }
 
+    pub fn debug() -> Device {
+        let cfg = CString::new("verbose=4").unwrap();
+        Device {
+            handle: unsafe { root::rtcNewDevice(cfg.as_ptr()) },
+        }
+    }
+
     pub fn get_error(&mut self) -> Option<root::RTCError> {
         let error = unsafe { root::rtcDeviceGetError(self.handle) };
         match error {
-            root::RTCError_RTC_NO_ERROR => None,
+            root::RTCError::NONE => None,
             _x => Some(_x),
         }
     }
@@ -101,25 +77,25 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        unsafe { root::rtcDeleteDevice(self.handle) };
+        unsafe { root::rtcReleaseDevice(self.handle) };
     }
 }
 
 /// Internal vertex representation
 #[repr(C)]
 struct EmbreeVertex {
-    x : f32,
-    y : f32,
-    z : f32,
-    w : f32,
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
 }
 
 /// Internal triangle presentation
 #[repr(C)]
 struct EmbreeTriangle {
-    i0 : i32,
-    i1 : i32,
-    i2 : i32
+    i0: i32,
+    i1: i32,
+    i2: i32,
 }
 
 /// The object used to pass data to Embree.
@@ -131,10 +107,8 @@ pub struct SceneConstruct {
 }
 
 impl SceneConstruct {
-    pub fn new(device: &mut Device, sflags: SceneFlags, aflags: AlgorithmFlags) -> SceneConstruct {
-        let p = unsafe {
-            root::rtcDeviceNewScene(device.handle, sflags.bits, aflags.bits)
-        };
+    pub fn new(device: &mut Device) -> SceneConstruct {
+        let p = unsafe { root::rtcNewScene(device.handle) };
 
         SceneConstruct {
             handle: p,
@@ -143,45 +117,45 @@ impl SceneConstruct {
     }
 
     /// Add a new TriangleMesh with the supplied vertex and indices vectors.
-    pub fn add_triangle_mesh(&mut self,
-                             geom_flags: GeometryFlags,
-                             vertices: Vec<Vector3<f32>>,
-                             normals: Vec<Vector3<f32>>,
-                             uv: Vec<Vector2<f32>>,
-                             indices: Vec<u32>) -> Arc<TriangleMesh> {
-        assert_eq!(indices.len() % 3, 0, "Indices must be a multiple of 3 for a triangle mesh but \
-         indices Vec has length {}", indices.len());
+    pub fn add_triangle_mesh(
+        &mut self,
+        device: &mut Device,
+        geom_flags: GeometryFlags,
+        vertices: Vec<Vector3<f32>>,
+        normals: Vec<Vector3<f32>>,
+        uv: Vec<Vector2<f32>>,
+        indices: Vec<u32>,
+    ) -> Arc<TriangleMesh> {
+        assert_eq!(
+            indices.len() % 3,
+            0,
+            "Indices must be a multiple of 3 for a triangle mesh but \
+             indices Vec has length {}",
+            indices.len()
+        );
         let num_triangles = indices.len() / 3;
 
-        let geom_id = unsafe { root::rtcNewTriangleMesh(self.handle,
-                                                        geom_flags.bits,
-                                                        num_triangles,
-                                                        vertices.len(),
-                                                        1) };
+        let geom_id =
+            unsafe { root::rtcNewGeometry(device.handle, root::RTCGeometryType::TRIANGLE) };
 
         // Set vertex buffer
         unsafe {
-            let e_vertices =  root::rtcMapBuffer(
-                self.handle,
-                geom_id,
-                root::RTCBufferType_RTC_VERTEX_BUFFER0) as *mut EmbreeVertex ;
+            let e_vertices = root::rtcMapBuffer(self.handle, geom_id, root::RTCBufferType::VERTEX)
+                as *mut EmbreeVertex;
 
-            for (i,v) in vertices.iter().enumerate() {
+            for (i, v) in vertices.iter().enumerate() {
                 (*e_vertices.offset(i as isize)).x = v.x;
                 (*e_vertices.offset(i as isize)).y = v.y;
                 (*e_vertices.offset(i as isize)).z = v.z;
                 (*e_vertices.offset(i as isize)).w = 1.0;
-
             }
-            root::rtcUnmapBuffer(self.handle,
-                                 geom_id,
-                                 root::RTCBufferType_RTC_VERTEX_BUFFER);
+            root::rtcUnmapBuffer(self.handle, geom_id, root::RTCBufferType::VERTEX);
         }
 
         // Set index buffer
         unsafe {
-            let e_indicies = root::rtcMapBuffer(self.handle, geom_id,
-                                                root::RTCBufferType_RTC_INDEX_BUFFER) as *mut EmbreeTriangle;
+            let e_indicies = root::rtcMapBuffer(self.handle, geom_id, root::RTCBufferType::INDEX)
+                as *mut EmbreeTriangle;
             {
                 let mut i: isize = 0;
                 let mut indice_iter = indices.iter();
@@ -194,8 +168,7 @@ impl SceneConstruct {
                     i += 1;
                 }
             }
-            root::rtcUnmapBuffer(self.handle, geom_id,
-                                 root::RTCBufferType_RTC_INDEX_BUFFER);
+            root::rtcUnmapBuffer(self.handle, geom_id, root::RTCBufferType::INDEX);
         }
 
         // Insert the new mesh into the geometry vector
@@ -207,7 +180,7 @@ impl SceneConstruct {
             indices,
         }));
 
-        return Arc::clone(self.geometry.last().unwrap())
+        return Arc::clone(self.geometry.last().unwrap());
     }
 }
 
@@ -223,7 +196,7 @@ impl Drop for Scene {
 }
 
 impl Scene {
-    pub fn mesh(&self, i: usize) -> &Arc<TriangleMesh>{
+    pub fn mesh(&self, i: usize) -> &Arc<TriangleMesh> {
         &self.geometry[i]
     }
 
@@ -308,15 +281,17 @@ impl Ray {
 
     pub fn embree(self) -> root::RTCRay {
         root::RTCRay {
-            org: [self.o.x, self.o.y, self.o.z],
-            align0: 0.0,
-            dir: [self.d.x, self.d.y, self.d.z],
-            align1: 0.0,
+            org_x: self.o.x,
+            org_y: self.o.y,
+            org_z: self.o.z,
             tnear: self.tnear,
-            tfar: self.tfar,
+            dir_x: self.d.x,
+            dir_y: self.d.y,
+            dir_z: self.d.z,
             time: self.time,
-            mask: 0xFFFFFFFF, // FIXME: Add support for mask
-            Ng: [0.0,0.0,0.0],
+            tfar: self.tfar,
+            mask: 0xFFFFFFFF,
+            Ng: [0.0, 0.0, 0.0],
             align2: 0.0,
             u: 0.0,
             v: 0.0,
@@ -351,7 +326,7 @@ pub struct Intersection {
 impl Intersection {
     pub fn from_ray(scene: &Scene, ray: root::RTCRay) -> Option<Intersection> {
         if ray.hit() {
-            let mesh = scene.mesh(ray.geomID as usize);
+            let mesh = scene.mesh(ray.id as usize);
             let i0 = mesh.indices[(ray.primID * 3) as usize] as usize;
             let i1 = mesh.indices[(ray.primID * 3 + 1) as usize] as usize;
             let i2 = mesh.indices[(ray.primID * 3 + 2) as usize] as usize;
@@ -360,7 +335,7 @@ impl Intersection {
             let d0 = &mesh.normals[i0];
             let d1 = &mesh.normals[i1];
             let d2 = &mesh.normals[i2];
-            let n_s = d0 * ( 1.0 - ray.u - ray.v) + d1 * ray.u + d2 * ray.v;
+            let n_s = d0 * (1.0 - ray.u - ray.v) + d1 * ray.u + d2 * ray.v;
 
             // UV interpolation
             let uv: Option<Vector2<f32>>;
@@ -370,7 +345,7 @@ impl Intersection {
                 let d0 = &mesh.uv[i0];
                 let d1 = &mesh.uv[i1];
                 let d2 = &mesh.uv[i2];
-                uv = Some(d0 * ( 1.0 - ray.u - ray.v) + d1 * ray.u + d2 * ray.v);
+                uv = Some(d0 * (1.0 - ray.u - ray.v) + d1 * ray.u + d2 * ray.v);
             }
 
             let mut n_g = Vector3::new(ray.Ng[0], ray.Ng[1], ray.Ng[2]).normalize();
@@ -379,11 +354,11 @@ impl Intersection {
             }
 
             // Construct the intersection
-            return Some(Intersection{
+            return Some(Intersection {
                 t: ray.tfar,
                 n_g,
                 n_s,
-                p : Point3::new(
+                p: Point3::new(
                     ray.org[0] + ray.tfar * ray.dir[0],
                     ray.org[1] + ray.tfar * ray.dir[1],
                     ray.org[2] + ray.tfar * ray.dir[2],
