@@ -6,6 +6,8 @@ NOTE: Need Rust 1.25 at least to support ```repr(align(X))``` routine. To instal
 
 ```RUSTUP_DIST_SERVER=https://dev-static.rust-lang.org rustup update stable```
 
+For windows, the current code assuming that embree will be installed in its default directory (```C:\\Program Files\\Intel\\Embree3 x64```).
+
 ## Description
 
 A Rust wrapper for Intel's Embree raytracing library. It short terms goal is to provide easy intersection test in **Rust**. The goal of this library is **NOT** to support all Embree features for the moment. However, I will be pleased to merge any pull request!
