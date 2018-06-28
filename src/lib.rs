@@ -338,6 +338,7 @@ impl Ray {
             mask: std::u32::MAX,
             id: 0,
             flags: 0,
+            __bindgen_align: [],
         }
     }
 }

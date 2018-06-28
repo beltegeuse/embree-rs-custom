@@ -5,15 +5,20 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 fn main() {
+    let mut args = vec!["-x", "c++", "-std=c++11"];
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
     println!("cargo:rustc-link-lib=embree3");
+    if cfg!(target_os = "windows") {
+        println!("cargo:rustc-link-search=native=C:\\Program Files\\Intel\\Embree3 x64\\lib");
+        args.push("-IC:\\Program Files\\Intel\\Embree3 x64\\include");
+    }
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
     // the resulting bindings.
     let bindings = bindgen::Builder::default()
-        .clang_args(["-x", "c++", "-std=c++11"].iter())
+        .clang_args(args.iter())
         .enable_cxx_namespaces()
         .whitelist_function("rtc.*")
         .whitelist_type("RTC.*")
@@ -57,7 +62,6 @@ fn main() {
         "RTC_CURVE_FLAG_",
         "RTC_SCENE_FLAG_",
         "RTC_BUILD_FLAG_",
-        "pub __bindgen_align: [u8; 0usize],",
     ];
 
     // Open and read the file entirely
