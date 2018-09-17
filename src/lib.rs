@@ -350,7 +350,7 @@ pub struct Intersection {
     /// Geometry normal
     pub n_g: Vector3<f32>,
     /// Shading normal
-    pub n_s: Vector3<f32>,
+    pub n_s: Option<Vector3<f32>>,
     /// Intersection point
     pub p: Point3<f32>,
     /// Textures coordinates
@@ -372,26 +372,30 @@ impl Intersection {
             let i2 = mesh.indices[(rh.hit.primID * 3 + 2) as usize] as usize;
 
             // Normal interpolation
-            let d0 = &mesh.normals[i0];
-            let d1 = &mesh.normals[i1];
-            let d2 = &mesh.normals[i2];
-            let n_s = d0 * (1.0 - rh.hit.u - rh.hit.v) + d1 * rh.hit.u + d2 * rh.hit.v;
+            // use the face normal to make the face shading normal consistent
+            let n_g = Vector3::new(rh.hit.Ng_x, rh.hit.Ng_y, rh.hit.Ng_z).normalize();
+            let n_s = if mesh.normals.is_empty() {
+                None
+            } else {
+                let d0 = &mesh.normals[i0];
+                let d1 = &mesh.normals[i1];
+                let d2 = &mesh.normals[i2];
+                let mut n_s = d0 * (1.0 - rh.hit.u - rh.hit.v) + d1 * rh.hit.u + d2 * rh.hit.v;
+                if n_g.dot(n_s) < 0.0 {
+                    n_s = -n_s;
+                }
+                Some(n_s)
+            };
 
             // UV interpolation
-            let uv: Option<Vector2<f32>>;
-            if mesh.uv.is_empty() {
-                uv = None;
+            let uv = if mesh.uv.is_empty() {
+                None
             } else {
                 let d0 = &mesh.uv[i0];
                 let d1 = &mesh.uv[i1];
                 let d2 = &mesh.uv[i2];
-                uv = Some(d0 * (1.0 - rh.hit.u - rh.hit.v) + d1 * rh.hit.u + d2 * rh.hit.v);
-            }
-
-            let mut n_g = Vector3::new(rh.hit.Ng_x, rh.hit.Ng_y, rh.hit.Ng_z).normalize();
-            if n_g.dot(n_s) < 0.0 {
-                n_g = -n_g;
-            }
+                Some(d0 * (1.0 - rh.hit.u - rh.hit.v) + d1 * rh.hit.u + d2 * rh.hit.v)
+            };
 
             // Construct the intersection
             return Some(Intersection {
