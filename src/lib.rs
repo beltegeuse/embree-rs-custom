@@ -1,5 +1,3 @@
-#![cfg_attr(feature = "clippy", feature(plugin))]
-#![cfg_attr(feature = "clippy", plugin(clippy))]
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -10,6 +8,7 @@ extern crate libc;
 use cgmath::InnerSpace;
 use cgmath::{Point3, Vector2, Vector3};
 use std::ffi::CString;
+use std::marker::PhantomData;
 use std::ptr;
 use std::sync::Arc;
 
@@ -82,18 +81,20 @@ struct EmbreeTriangle {
 /// The object used to pass data to Embree.
 /// The commit function need to be called in order to get Scene object.
 /// Only Scene object provides intersection routines.
-pub struct SceneConstruct {
+pub struct SceneConstruct<'device> {
     handle: root::RTCScene,
     geometry: Vec<Arc<TriangleMesh>>,
+    device: PhantomData<&'device Device>,
 }
 
-impl SceneConstruct {
-    pub fn new(device: &Device) -> SceneConstruct {
+impl<'device> SceneConstruct<'device> {
+    pub fn new(device: &'device Device) -> SceneConstruct {
         let p = unsafe { root::rtcNewScene(device.handle) };
 
         SceneConstruct {
             handle: p,
             geometry: Vec::<Arc<TriangleMesh>>::new(),
+            device: PhantomData,
         }
     }
 
@@ -180,6 +181,7 @@ impl SceneConstruct {
             root::rtcCommitGeometry(geom_handle);
         }
 
+        // Attach to the scene
         let geom_id = unsafe { root::rtcAttachGeometry(self.handle, geom_handle) };
 
         // Insert the new mesh into the geometry vector
@@ -338,7 +340,6 @@ impl Ray {
             mask: std::u32::MAX,
             id: 0,
             flags: 0,
-            __bindgen_align: [],
         }
     }
 }
