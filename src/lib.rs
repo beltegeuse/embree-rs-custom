@@ -102,7 +102,7 @@ impl<'device> SceneConstruct<'device> {
     pub fn add_triangle_mesh(
         &mut self,
         device: &Device,
-        vertices: Vec<Vector3<f32>>,
+        vertices: Vec<Point3<f32>>,
         normals: Vec<Vector3<f32>>,
         uv: Vec<Vector2<f32>>,
         indices: Vec<u32>,
@@ -278,7 +278,7 @@ pub struct TriangleMesh {
     // pub(crate) handle: &'a root::RTCGeometry,
     pub geom_id: u32,
     /// The list of all vertices
-    pub vertices: Vec<Vector3<f32>>,
+    pub vertices: Vec<Point3<f32>>,
     /// The list of all normals
     pub normals: Vec<Vector3<f32>>,
     /// The list of all uv.
