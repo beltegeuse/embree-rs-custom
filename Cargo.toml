@@ -3,6 +3,7 @@ name = "embree-rs"
 description = "A simple wrapper for embree ray tracing library."
 version = "0.3.2"
 authors = ["Adrien Gruson <adrien.gruson@gmail.com"]
+edition = "2018"
 
 # These URLs point to more information about the package. These are
 # intended to be webviews of the relevant data, not necessarily compatible
@@ -35,8 +36,8 @@ travis-ci = { repository = "beltegeuse/embree-rs" }
 maintenance = { status = "experimental" }
 
 [dependencies]
-libc = "0.2.43"
+libc = "0.2"
 cgmath = "0.16"
 
 [build-dependencies]
-bindgen = "0.40.0"
+bindgen = "0.45"
