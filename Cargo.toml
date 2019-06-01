@@ -37,7 +37,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 libc = "0.2"
-cgmath = "0.16"
+cgmath = "0.17"
 
 [build-dependencies]
-bindgen = "0.45"
+bindgen = "0.49"
