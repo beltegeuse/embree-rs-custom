@@ -1,5 +1,7 @@
 # Embree-rs
 
+# This library have been archived. Please checkout [embree-rs](https://github.com/Twinklebear/embree-rs)
+
 [![Build Status](https://travis-ci.org/beltegeuse/embree-rs.svg?branch=master)](https://travis-ci.org/beltegeuse/embree-rs)
 
 NOTE: Need Rust 1.25 at least to support ```repr(align(X))``` routine. To install this version, you can run the following command:
